@@ -1,6 +1,7 @@
 use crate::daemon::config_manager::DaemonConfigManager;
 use crate::types::{DaemonAction, DaemonRequest, DaemonResponse};
 use crate::utils::masking::to_error_message;
+use crate::utils::paths::runtime_dir;
 use anyhow::Result;
 use futures::FutureExt;
 use serde_json::{json, Value};
@@ -19,7 +20,7 @@ const DAEMON_IDLE_SECONDS: u64 = 300;
 pub async fn run_server() -> Result<()> {
     #[cfg(unix)]
     {
-        let runtime_dir = crate::daemon::paths::runtime_dir()?;
+        let runtime_dir = runtime_dir()?;
         tokio::fs::create_dir_all(&runtime_dir).await?;
         let socket_path = crate::daemon::paths::socket_path()?;
         let _ = tokio::fs::remove_file(&socket_path).await;
@@ -52,7 +53,7 @@ pub async fn run_server() -> Result<()> {
     }
     #[cfg(windows)]
     {
-        let runtime_dir = crate::daemon::paths::runtime_dir()?;
+        let runtime_dir = runtime_dir()?;
         tokio::fs::create_dir_all(&runtime_dir).await?;
         let pipe_name = crate::daemon::paths::socket_path_string()?;
         let pid_path = crate::daemon::paths::pid_path()?;

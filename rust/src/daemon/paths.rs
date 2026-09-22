@@ -1,11 +1,8 @@
-use anyhow::{Context, Result};
+use crate::utils::paths::runtime_dir;
+#[cfg(windows)]
+use anyhow::Context;
+use anyhow::Result;
 use std::path::PathBuf;
-
-pub fn runtime_dir() -> Result<PathBuf> {
-    Ok(dirs::home_dir()
-        .context("无法解析用户主目录")?
-        .join(".agent-database-cli"))
-}
 
 pub fn pid_path() -> Result<PathBuf> {
     Ok(runtime_dir()?.join("agent-database-cli.pid"))

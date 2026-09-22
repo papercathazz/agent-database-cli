@@ -1,5 +1,6 @@
 use crate::daemon::{client, paths};
 use crate::types::{DaemonAction, DaemonRequest};
+use crate::utils::paths::runtime_dir;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::process::{Command, Stdio};
@@ -9,7 +10,7 @@ pub async fn start_daemon() -> Result<Value> {
     if client::is_daemon_running().await {
         return Ok(json!({ "started": false, "socket": socket_display()? }));
     }
-    std::fs::create_dir_all(paths::runtime_dir()?)?;
+    std::fs::create_dir_all(runtime_dir()?)?;
     let current_exe = std::env::current_exe()?;
     let mut command = Command::new(current_exe);
     command

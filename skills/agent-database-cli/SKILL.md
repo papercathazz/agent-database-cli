@@ -1,6 +1,6 @@
 ---
 name: agent-database-cli
-description: 使用本地 agent-database-cli 安全操作已配置的数据库。适用于列出数据库连接、测试连接、执行 SQL/Redis/MongoDB 命令、查询表/列/集合/keys 元信息、管理本地连接 daemon，以及验证只读模式和命令黑名单的场景。
+description: 使用本地 agent-database-cli 安全操作已配置的数据库。适用于列出数据库连接、测试连接、执行 SQL/Redis/MongoDB 命令、查询表/列/集合/keys 元信息、管理本地连接 daemon、启动配置编辑页面，以及验证只读模式和命令黑名单的场景。
 ---
 
 # agent-database-cli 使用说明
@@ -19,6 +19,7 @@ description: 使用本地 agent-database-cli 安全操作已配置的数据库�
 - daemon 在 Windows 使用 named pipe，在 macOS/Linux 使用 Unix socket
 - 预编译二进制支持 macOS x64/arm64、Linux x64/arm64、Windows x64
 - Oracle 默认使用 SQLcl；显式配置 `oracleDriver: "oracle"` 或 `"oracledb"` 时使用原生 Oracle 驱动
+- 用本地页面可视化编辑配置文件：`editor start` 启动、`editor stop` 关闭、`editor status` 查看状态
 
 它不做的事：
 
@@ -228,6 +229,34 @@ agent-database-cli reset --db "<databaseName>"
 
 如果 daemon 正在运行，会断开并清理该数据库连接；下一次命令会重新连接。
 
+## editor
+
+在本机启动配置编辑服务，用页面可视化修改配置文件。
+
+```bash
+agent-database-cli editor start
+agent-database-cli editor start --no-open
+agent-database-cli editor status
+agent-database-cli editor stop
+```
+
+返回值：
+
+- `start` 成功时输出 `started`、`running`、`url`、`port`、`pid`、`configPath`、`browserOpened`；服务已在运行时 `started` 为 `false`
+- `status` 未运行时输出 `{ "running": false }`，状态文件残留时额外返回 `stale`
+- `stop` 未运行时不报错，输出 `{ "stopped": false, "running": false }`
+
+约束：
+
+- 服务只监听 `127.0.0.1`，端口默认随机，可用 `--port` 指定
+- 访问令牌每次启动重新生成，随 URL fragment 交给页面，`/api/*` 请求必须携带
+- 状态文件 `~/.agent-database-cli/editor.json` 权限为 `0600`
+- 超过 `10` 分钟没有任何操作，编辑服务会自动退出；页面在有操作时定期打点保活
+- 保存前先校验 JSON 结构和配置规则，通过后备份 `config.json.bak` 再原子替换，并保留原文件权限
+- 页面只读写配置文件原文，不触发明文密码迁移；密文默认不展示，点眼睛才会按需解密，且只接受当前配置引用到的 ref，解密结果不写回配置文件
+- 右侧 JSON 面板可切「当前连接 / 全局」范围，并按磁盘内容做行级 diff（边栏 `+` 新增、`~` 修改）
+- 这是给人用的页面；Agent 自己改配置仍应直接编辑配置文件，并在修改前确认目标连接
+
 ## Oracle SQLcl
 
 当 Oracle `oracledb` Thin mode 不支持目标库版本时，可以改用 SQLcl。
@@ -255,4 +284,6 @@ SQLcl 模式通过 stdin 传入连接脚本，避免密码出现在命令行参�
 - `meta columns` 缺少 `--table` 会失败
 - 命中黑名单时失败，错误中包含 `黑名单拒绝执行命令`
 - 违反只读模式时失败，错误中包含 `只读模式拒绝执行命令`
+- 编辑页面保存时 JSON 结构或配置规则不合法会失败，错误里带上具体规则
+- `editor start` 在端口被占用或服务启动超时时失败
 - 所有失败统一在 stderr 输出错误信息，退出码为 `1`

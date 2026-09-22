@@ -1,8 +1,12 @@
 use crate::secrets::{decrypt_secret, encrypt_secret};
 use crate::types::{AppConfig, DatabaseConfig, DatabaseType, OracleDriver};
+use crate::utils::paths::runtime_dir;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::{env, fs, path::{Path, PathBuf}};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 use url::Url;
 
 pub const CONFIG_ENV: &str = "AGENT_DATABASE_CLI_CONFIG";
@@ -12,8 +16,7 @@ pub fn resolve_config_path() -> Result<PathBuf> {
     if let Ok(path) = env::var(CONFIG_ENV) {
         return Ok(PathBuf::from(path));
     }
-    let home = dirs::home_dir().context("无法解析用户主目录")?;
-    Ok(home.join(".agent-database-cli").join("config.json"))
+    Ok(runtime_dir()?.join("config.json"))
 }
 
 pub fn load_config(path: Option<PathBuf>) -> Result<AppConfig> {
@@ -279,21 +282,17 @@ fn resolve_url_password_ref(path: &Path, name: &str, db: &mut DatabaseConfig) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_config_path(name: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("系统时间早于 UNIX_EPOCH")
-            .as_nanos();
-        let dir = env::temp_dir().join(format!("agent-database-cli-{name}-{unique}"));
-        fs::create_dir_all(&dir).expect("创建临时目录失败");
-        dir.join("config.json")
+    /// 返回 (临时目录守卫, 配置路径)：守卫负责在用例结束时删掉目录
+    fn temp_config_path(name: &str) -> (crate::editor::test_support::TempDir, PathBuf) {
+        let dir = crate::editor::test_support::TempDir::new(name);
+        let path = dir.path().join("config.json");
+        (dir, path)
     }
 
     #[test]
     fn load_config_migrates_database_url_password() {
-        let path = temp_config_path("url-password");
+        let (_dir, path) = temp_config_path("url-password");
         fs::write(
             &path,
             r#"{
@@ -318,7 +317,7 @@ mod tests {
 
     #[test]
     fn load_config_migrates_ssh_password_and_passphrase() {
-        let path = temp_config_path("ssh-secrets");
+        let (_dir, path) = temp_config_path("ssh-secrets");
         fs::write(
             &path,
             r#"{

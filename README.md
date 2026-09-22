@@ -12,10 +12,10 @@ MySQL · PostgreSQL · Redis · Oracle · MongoDB · 只读模式 · 命令黑�
   <img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white" alt="Node.js >=20">
   <img src="https://img.shields.io/badge/npm-%3E%3D10-CB3837?logo=npm&logoColor=white" alt="npm >=10">
   <img src="https://img.shields.io/badge/sys-win%2Fmac%2Flinux-0078D6" alt="sys win/mac/linux">
-  <img src="https://img.shields.io/badge/release-v0.2.20-blue" alt="release v0.2.20">
+  <img src="https://img.shields.io/badge/release-v0.3.0-blue" alt="release v0.2.20">
 </p>
 
-[AI 一键安装](#ai-一键安装) · [安装](#安装) · [配置](#配置) · [权限配置](#权限配置) · [Oracle SQLcl](#oracle-sqlcl) · [许可证](#许可证) · [友情链接](#友情链接)
+[AI 一键安装](#ai-一键安装) · [安装](#安装) · [配置](#配置) · [权限配置](#权限配置) · [编辑页面](#编辑页面) · [Oracle SQLcl](#oracle-sqlcl) · [许可证](#许可证) · [友情链接](#友情链接)
 
 中文 | [English](README_EN.md)
 
@@ -32,6 +32,7 @@ MySQL · PostgreSQL · Redis · Oracle · MongoDB · 只读模式 · 命令黑�
 - 查询数据库元信息，例如表、列、集合、Redis keys；Redis keys 元信息使用 `SCAN` 分批读取，避免阻塞式 `KEYS`
 - 按单个数据库配置启用只读模式和命令黑名单
 - Oracle 默认使用 SQLcl；需要 Oracle Instant Client 时可显式切换到 `oracle`/`oracledb` 原生驱动
+- 用本地页面可视化编辑配置文件，改完直接校验并落盘
 - 不保存或输出脱敏前的密码、token、secret
 
 驱动配置表：
@@ -279,7 +280,7 @@ SSH 隧道配置支持密码、私钥、密码加私钥、带通行短语的私�
 MySQL / PostgreSQL / Oracle 常见高危 SQL：
 
 ```json
-["drop", "truncate", "delete", "update", "insert", "merge", "alter", "create", "replace", "grant", "revoke"]
+["drop", "truncate", "delete", "update", "insert", "merge", "alter", "create", "replace", "grant", "revoke", "call", "copy", "load", "vacuum", "analyze"]
 ```
 
 Redis 常见高危命令：
@@ -329,6 +330,50 @@ Oracle 保留双驱动设计：
 - `oracleDriver: "oracledb"`：Node 版原生驱动兼容值；Rust 版按 `oracle` 原生入口处理。
 
 当前默认入口已切换为 Rust 原生 CLI，并通过 npm 平台子包分发 Windows、Linux、macOS 二进制；Oracle 默认 SQLcl，原生 Oracle 驱动需显式配置。
+
+## 编辑页面
+
+`editor` 命令会在本机启动一个编辑服务，用页面直接改配置文件：
+
+```bash
+agent-database-cli editor start              # 启动服务并打开浏览器
+agent-database-cli editor start --no-open    # 只启动服务
+agent-database-cli editor start --port 4599  # 指定端口，默认随机空闲端口
+agent-database-cli editor status
+agent-database-cli editor stop
+```
+
+启动后命令会输出页面地址 `http://127.0.0.1:<端口>/#t=<访问令牌>`。
+
+| 项目 | 说明 |
+| --- | --- |
+| 监听地址 | 只监听 `127.0.0.1`，不暴露到局域网 |
+| 访问令牌 | 每次启动随机生成，随 URL fragment 交给页面，`/api/*` 请求必须携带，页面不会把令牌发给其它地址 |
+| 状态文件 | `~/.agent-database-cli/editor.json`，记录 pid、端口、令牌，权限收紧为 `0600` |
+| 保存方式 | 先校验 JSON 结构和配置规则，通过后备份 `config.json.bak`，再写临时文件并原子替换，同时保留原文件权限 |
+| 停止方式 | `editor stop` 先请求服务优雅退出，失败时按记录到的 pid 终止进程 |
+| 空闲退出 | 超过 `10` 分钟没有任何操作，服务会自己退出并清理状态文件；页面在有操作时会定期打点保活，停手后不再打点 |
+| 目标文件 | `${AGENT_DATABASE_CLI_CONFIG:-~/.agent-database-cli/config.json}` |
+
+页面按 `type` 只展示当前数据库可用的字段，连接 URL 会自动拆出用户名、密码、主机、端口和库名，并画出本机 → SSH 跳板 → 数据库的访问路径。
+
+右侧 JSON 面板显示即将写入磁盘的完整内容，也可以直接编辑文本，编辑结果实时校验并同步回表单：
+
+| 面板能力 | 说明 |
+| --- | --- |
+| 范围切换 | `当前连接` 只显示选中的连接（键名就是连接名，可直接复制到另一份配置），`全局` 显示整份文件 |
+| 行级 diff | 以磁盘内容为基准，在左侧边栏标出新增行（`+`）和修改行（`~`），保存后标记清空 |
+| 密文显隐 | 输入框右侧的眼睛按需解密或切显隐，明文只用于显示 |
+
+敏感字段的处理方式：
+
+| 状态 | 页面表现 |
+| --- | --- |
+| 已有 `passwordRef` / `passphraseRef` | 默认显示为已加密；点该字段的眼睛才会按需解密（只接受当前配置里引用到的 ref），解密结果只进输入框显示，不写回表单数据和配置文件 |
+| 填写明文密码 | 明文写入配置文件，下一次执行 CLI 命令时按原有逻辑加密迁移到 `secrets.json` |
+| 移除凭据 | 同时清掉 URL 里的密码和对应的 `*Ref` |
+
+页面只负责写配置文件，真正的权限控制仍然由 CLI 在执行命令时按黑名单和只读模式判断。
 
 ## Oracle SQLcl
 

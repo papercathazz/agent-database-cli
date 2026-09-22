@@ -1,6 +1,7 @@
 mod adapters;
 mod config;
 mod daemon;
+mod editor;
 mod output;
 mod runtime;
 mod secrets;
@@ -63,6 +64,11 @@ enum Commands {
         #[command(subcommand)]
         command: DaemonCommands,
     },
+    #[command(name = "editor", about = "可视化编辑本地配置文件")]
+    Editor {
+        #[command(subcommand)]
+        command: EditorCommands,
+    },
     #[command(name = "install-skill", about = "安装或更新 Agent skill")]
     InstallSkill(InstallSkillArgs),
 }
@@ -85,6 +91,30 @@ enum DaemonCommands {
     Status,
     #[command(hide = true)]
     Run,
+}
+
+#[derive(Subcommand)]
+enum EditorCommands {
+    #[command(about = "启动编辑服务并打开页面")]
+    Start {
+        #[arg(long, help = "监听端口，默认 0 表示随机空闲端口")]
+        port: Option<u16>,
+        #[arg(long, help = "启动后不自动打开浏览器")]
+        no_open: bool,
+    },
+    #[command(about = "关闭编辑服务")]
+    Stop,
+    #[command(about = "查看编辑服务状态")]
+    Status,
+    #[command(hide = true)]
+    Run {
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+        #[arg(long)]
+        token: Option<String>,
+        #[arg(long)]
+        config_path: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -124,6 +154,22 @@ async fn run() -> Result<()> {
             DaemonCommands::Status => daemon::control::daemon_status().await?,
             DaemonCommands::Run => {
                 daemon::server::run_server().await?;
+                serde_json::json!({ "stopped": true })
+            }
+        },
+        Commands::Editor { command } => match command {
+            EditorCommands::Start { port, no_open } => {
+                editor::control::start_editor(port.unwrap_or(0), !no_open).await?
+            }
+            EditorCommands::Stop => editor::control::stop_editor().await?,
+            EditorCommands::Status => editor::control::editor_status().await?,
+            EditorCommands::Run {
+                port,
+                token,
+                config_path,
+            } => {
+                editor::server::run_editor_server(port, token, config_path.map(PathBuf::from))
+                    .await?;
                 serde_json::json!({ "stopped": true })
             }
         },

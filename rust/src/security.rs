@@ -73,6 +73,47 @@ static MONGO_READ_COMMANDS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
 static MONGO_AGGREGATE_WRITE_STAGES: Lazy<HashSet<&'static str>> =
     Lazy::new(|| ["$out", "$merge"].into_iter().collect());
 
+/// 编辑器黑名单输入框的推荐补全项。
+///
+/// 这是「值得拉黑的高危命令」推荐清单，不是完整枚举：真正决定命令能否执行的判定在
+/// `assert_command_allowed` 与 `is_read_only_command`；Redis / MongoDB 采用「只读白名单，
+/// 其余视为写」的判定方式，本来也无法穷举，所以推荐项与判定表用途不同、允许不一致。
+/// SQL 侧这里取判定表 `SQL_WRITE_COMMANDS` 的并集，避免漏掉已知写命令。
+static RECOMMENDED_BLACKLIST_SQL: &[&str] = &[
+    "drop", "truncate", "delete", "update", "insert", "merge", "alter", "create", "replace",
+    "grant", "revoke", "call", "copy", "load", "vacuum", "analyze",
+];
+static RECOMMENDED_BLACKLIST_REDIS: &[&str] = &[
+    "flushall", "flushdb", "del", "unlink", "set", "mset", "expire", "rename", "hset", "lpush",
+    "rpush", "sadd", "zadd", "keys",
+];
+static RECOMMENDED_BLACKLIST_MONGODB: &[&str] = &[
+    "insertOne",
+    "insertMany",
+    "updateOne",
+    "updateMany",
+    "replaceOne",
+    "deleteOne",
+    "deleteMany",
+    "findAndModify",
+    "findOneAndUpdate",
+    "findOneAndDelete",
+    "drop",
+    "dropDatabase",
+    "createIndex",
+    "dropIndex",
+    "$out",
+    "$merge",
+];
+
+pub fn recommended_blacklists() -> Value {
+    serde_json::json!({
+        "sql": RECOMMENDED_BLACKLIST_SQL,
+        "redis": RECOMMENDED_BLACKLIST_REDIS,
+        "mongodb": RECOMMENDED_BLACKLIST_MONGODB,
+    })
+}
+
 pub fn normalize_command(command: &str) -> String {
     command.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -317,6 +358,16 @@ fn get_mongo_command_name(command: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sql_recommendation_covers_every_sql_write_command() {
+        for command in SQL_WRITE_COMMANDS {
+            assert!(
+                RECOMMENDED_BLACKLIST_SQL.contains(command),
+                "推荐黑名单缺少写命令: {command}"
+            );
+        }
+    }
 
     #[test]
     fn redis_ping_is_read_only() {

@@ -15,7 +15,7 @@ MySQL · PostgreSQL · Redis · Oracle · MongoDB · Read-only mode · Command b
   <img src="https://img.shields.io/badge/release-v0.2.20-blue" alt="release v0.2.20">
 </p>
 
-[AI One-Click Installation](#ai-one-click-installation) · [Installation](#installation) · [Configuration](#configuration) · [Permission Configuration](#permission-configuration) · [Oracle SQLcl](#oracle-sqlcl) · [License](#license) · [Friendly Links](#friendly-links)
+[AI One-Click Installation](#ai-one-click-installation) · [Installation](#installation) · [Configuration](#configuration) · [Permission Configuration](#permission-configuration) · [Editor](#editor) · [Oracle SQLcl](#oracle-sqlcl) · [License](#license) · [Friendly Links](#friendly-links)
 
 [中文](README.md) | English
 
@@ -34,6 +34,7 @@ What it can do:
 - Auto-start the local daemon on demand; the daemon exits after `300` idle seconds by default
 - Keep connections alive through the local daemon; each database connection is released after `180` idle seconds by default
 - Oracle uses SQLcl by default; native `oracle`/`oracledb` drivers can be selected explicitly when Oracle Instant Client is available
+- Edit the configuration file visually in a local page, with validation before writing to disk
 - Never store or print unmasked passwords, tokens, or secrets
 - Use named pipes on Windows and Unix sockets on macOS/Linux for the daemon
 
@@ -278,7 +279,7 @@ It is recommended to use both `readonly` and `blacklist` together for permission
 Common high-risk SQL for MySQL / PostgreSQL / Oracle:
 
 ```json
-["drop", "truncate", "delete", "update", "insert", "merge", "alter", "create", "replace", "grant", "revoke"]
+["drop", "truncate", "delete", "update", "insert", "merge", "alter", "create", "replace", "grant", "revoke", "call", "copy", "load", "vacuum", "analyze"]
 ```
 
 Common high-risk Redis commands:
@@ -318,6 +319,50 @@ Recommended for a dedicated writable connection:
   "keepAliveSeconds": 180
 }
 ```
+
+## Editor
+
+The `editor` command starts a local editing service so you can change the configuration file in a page:
+
+```bash
+agent-database-cli editor start              # start and open the browser
+agent-database-cli editor start --no-open    # start without opening a browser
+agent-database-cli editor start --port 4599  # fixed port; a random free port is used by default
+agent-database-cli editor status
+agent-database-cli editor stop
+```
+
+The command prints the page address `http://127.0.0.1:<port>/#t=<token>`.
+
+| Item | Description |
+| --- | --- |
+| Bind address | Listens on `127.0.0.1` only and is never exposed to the network |
+| Access token | Regenerated on every start, handed to the page through the URL fragment; every `/api/*` request must carry it and the page never sends it anywhere else |
+| State file | `~/.agent-database-cli/editor.json` holds pid, port, and token with `0600` permissions |
+| Saving | Validates JSON structure and configuration rules, backs up `config.json.bak`, then writes a temp file and atomically replaces the target, keeping the original file permissions |
+| Stopping | `editor stop` asks the service to exit gracefully and falls back to terminating the recorded pid |
+| Idle exit | The service exits by itself and cleans up its state file after `10` minutes without any activity; the page keeps it alive with periodic pings while you are interacting and stops pinging once you leave it alone |
+| Target file | `${AGENT_DATABASE_CLI_CONFIG:-~/.agent-database-cli/config.json}` |
+
+The page only shows fields that apply to the selected `type`, splits the connection URL into username, password, host, port, and database, and draws the local → SSH jump host → database path.
+
+The JSON panel on the right shows exactly what will be written to disk and stays editable, with live validation that syncs back to the form:
+
+| Panel capability | Description |
+| --- | --- |
+| Scope switch | `当前连接` shows only the selected connection (keyed by its name, ready to paste into another config), `全局` shows the whole file |
+| Line diff | Compares against the on-disk content and marks added (`+`) and modified (`~`) lines in the left gutter; marks clear after saving |
+| Secret toggle | The eye next to a secret field decrypts on demand or toggles visibility; plaintext is only used for display |
+
+How sensitive fields are handled:
+
+| State | Page behavior |
+| --- | --- |
+| Existing `passwordRef` / `passphraseRef` | Shown as encrypted by default; clicking the eye on that field decrypts it on demand (only refs referenced by the current config are accepted) and the result is only rendered into the input, never written back to the form data or the config file |
+| Typing a plaintext password | Written to the configuration file in plaintext and encrypted into `secrets.json` by the next CLI command, following the existing migration logic |
+| Removing credentials | Clears both the URL password and the related `*Ref` |
+
+The page only writes the configuration file; permission control still happens when the CLI executes a command with the blocklist and read-only rules.
 
 ## Oracle SQLcl
 
