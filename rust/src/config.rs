@@ -2,7 +2,7 @@ use crate::secrets::{decrypt_secret, encrypt_secret};
 use crate::types::{AppConfig, DatabaseConfig, DatabaseType, OracleDriver};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::{Path, PathBuf}};
 use url::Url;
 
 pub const CONFIG_ENV: &str = "AGENT_DATABASE_CLI_CONFIG";
@@ -133,7 +133,7 @@ fn secret_ref_for(db_name: &str, field: &str) -> String {
     format!("{SECRET_REF_PREFIX}{db_name}:{field}")
 }
 
-fn migrate_plain_secrets(path: &PathBuf) -> Result<()> {
+fn migrate_plain_secrets(path: &Path) -> Result<()> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("读取配置文件失败: {}", path.display()))?;
     let mut root: Value = serde_json::from_str(&raw).context("配置文件不是合法 JSON")?;
@@ -172,7 +172,7 @@ fn migrate_plain_secrets(path: &PathBuf) -> Result<()> {
 }
 
 fn migrate_url_password(
-    path: &PathBuf,
+    path: &Path,
     db_name: &str,
     object: &mut serde_json::Map<String, Value>,
 ) -> Result<bool> {
@@ -205,7 +205,7 @@ fn migrate_url_password(
 }
 
 fn migrate_nested_secret(
-    path: &PathBuf,
+    path: &Path,
     db_name: &str,
     object: &mut serde_json::Map<String, Value>,
     parent_key: &str,
@@ -235,7 +235,7 @@ fn migrate_nested_secret(
     Ok(true)
 }
 
-fn resolve_secret_refs(path: &PathBuf, config: &mut AppConfig) -> Result<()> {
+fn resolve_secret_refs(path: &Path, config: &mut AppConfig) -> Result<()> {
     for (name, db) in &mut config.databases {
         resolve_url_password_ref(path, name, db)?;
         if let Some(tunnel) = &mut db.ssh_tunnel {
@@ -254,7 +254,7 @@ fn resolve_secret_refs(path: &PathBuf, config: &mut AppConfig) -> Result<()> {
     Ok(())
 }
 
-fn resolve_url_password_ref(path: &PathBuf, name: &str, db: &mut DatabaseConfig) -> Result<()> {
+fn resolve_url_password_ref(path: &Path, name: &str, db: &mut DatabaseConfig) -> Result<()> {
     if db.password_ref.is_none() {
         return Ok(());
     }

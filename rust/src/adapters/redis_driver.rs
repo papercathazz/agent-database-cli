@@ -76,7 +76,10 @@ impl RedisAdapter {
                 .ok_or_else(|| anyhow::anyhow!("Redis Cluster 节点清单缺少重定向目标: {target}"))?
         };
         if debug_enabled() {
-            eprintln!("[rust-db-cli] redis connect redirected {} via {}", target, url);
+            eprintln!(
+                "[rust-db-cli] redis connect redirected {} via {}",
+                target, url
+            );
         }
         let client = Client::open(url.as_str())?;
         let conn = timeout(
