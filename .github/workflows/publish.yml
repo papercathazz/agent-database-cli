@@ -13,6 +13,7 @@ permissions:
 jobs:
   publish-binaries:
     name: Publish ${{ matrix.package }}
+    needs: version-check
     runs-on: ${{ matrix.runner }}
     environment: npm
     strategy:
@@ -162,3 +163,30 @@ jobs:
             exit 0
           fi
           exit 1
+
+  version-check:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check package.json / Cargo.toml / tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Cargo.toml 落后于 package.json 时，二进制自报版本会和发布版本不一致，
+          # 这类漂移必须在发布前拦住，而不是等用户发现。
+          if [[ "${{ github.ref }}" != refs/tags/* ]]; then
+            node scripts/sync-version.mjs --check
+            echo "非 tag 触发，仅校验 package.json 与 Cargo.toml"
+            exit 0
+          fi
+          tag="${{ github.ref_name }}"
+          tag="${tag#v}"
+          if [[ "${tag}" == *-extension ]]; then
+            echo "extension tag 不发 npm 包，跳过版本校验"
+            exit 0
+          fi
+          node scripts/sync-version.mjs --check --expect "${tag}"

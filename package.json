@@ -7,6 +7,8 @@
     "agent-database-cli": "bin/agent-database-cli.js"
   },
   "scripts": {
+    "sync-version": "node scripts/sync-version.mjs",
+    "version": "node scripts/sync-version.mjs",
     "build": "cargo build --release --bin agent-database-cli",
     "build:rust": "cargo build --release --bin agent-database-cli",
     "dev": "cargo run --bin agent-database-cli --",
