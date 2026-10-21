@@ -130,6 +130,14 @@ button{cursor:pointer}
 .rail-list{list-style:none;margin:0;padding:0 10px 10px;overflow:auto;flex:1;min-height:0;scrollbar-width:thin}
 .rail-list::-webkit-scrollbar{width:8px}
 .rail-list::-webkit-scrollbar-thumb{background:var(--ink-3);border-radius:8px}
+.rail-controls{padding:0 10px 12px;display:grid;gap:8px}
+.rail-controls .inp{min-width:0;font-size:11px;padding:9px}
+.rail-mode{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.rail-mode button{min-width:0;padding:7px 3px;font-size:10px;white-space:nowrap}
+.rail-section summary{padding:12px 6px 8px;color:var(--dim);font-size:11px;cursor:pointer;overflow-wrap:anywhere}
+.rail-section summary b{margin-left:7px;color:var(--dim-2);font:10px var(--mono)}
+.rail-section summary:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.section-rows{list-style:none;margin:0;padding:0}
 .row{
   position:relative;display:flex;align-items:center;gap:10px;width:100%;
   padding:11px 12px 11px 14px;border-radius:var(--r);text-align:left;
@@ -449,6 +457,8 @@ body:not(.booted) .name{animation:reveal .6s var(--ease) both}
   .rail{width:100%;border-right:0;border-bottom:1px solid var(--line);max-height:38vh}
   .rail-list{display:flex;gap:6px;overflow-x:auto;padding:0 12px 12px}
   .rail-list li{flex:none}
+  .rail-list[data-mode="group"],.rail-list[data-mode="tags"]{display:block;overflow-y:auto}
+  .rail-list[data-mode="group"] .row,.rail-list[data-mode="tags"] .row{width:100%}
   .row{width:auto;padding:10px 14px;border:1px solid var(--line)}
   .board-in{padding:22px 18px 34px}
   /* 抽屉停在提交条上方，保存按钮不会被盖住 */
@@ -522,6 +532,7 @@ body:not(.booted) .name{animation:reveal .6s var(--ease) both}
   <main class="shell">
     <nav class="rail">
       <div class="rail-head"><span>连接</span><b id="railCount">00</b></div>
+      <div class="rail-controls"><input class="inp" id="railSearch" type="search" placeholder="搜索连接、分组或标签" aria-label="搜索连接、分组或标签"><div class="seg rail-mode" data-seg="listMode" role="group" aria-label="连接展示方式"><button data-value="all" aria-pressed="true">全部</button><button data-value="group" aria-pressed="false">按分组</button><button data-value="tags" aria-pressed="false">按标签</button></div></div>
       <ul class="rail-list" id="railList"></ul>
       <button class="rail-add" data-act="add"><svg class="i i-s"><use href="#i-plus"></use></svg><span>新建连接</span></button>
     </nav>

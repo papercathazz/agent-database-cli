@@ -102,6 +102,8 @@ AGENT_DATABASE_CLI_CONFIG=/path/to/config.json agent-database-cli list
 字段：
 
 - `type`: `mysql`、`postgres`、`redis`、`oracle`、`mongodb`
+- `group`: 可选单层分组名
+- `tags`: 可选标签字符串数组，去空白、去重并保留大小写
 - `url`: 数据库连接 URL
 - `passwordRef`: 数据库 URL 密码的本地密文引用，首次使用明文 URL 密码时自动生成
 - `database`: MongoDB 默认数据库名，可选
@@ -135,13 +137,15 @@ AGENT_DATABASE_CLI_CONFIG=/path/to/config.json
 ```bash
 agent-database-cli list
 agent-database-cli --format table list
+agent-database-cli list --group 生产环境 --tag 应用
 ```
 
+`--group` 与 `--tag` 区分大小写精确匹配，同时指定时取交集；无匹配时 `configured` 与 `connections` 均为空数组。
 
 返回值：
 
 - 成功时 stdout 输出 JSON 或表格
-- 输出包含 `supported`、`configured`、`configPath`
+- 输出包含 `supported`、`configured`、`connections`、`configPath`；`configured` 保持连接名数组，`connections` 含 `name`、`type`、`group`、`tags`
 - 配置文件不存在时仍会输出支持列表，`configured` 为空
 - 退出码为 `0`
 

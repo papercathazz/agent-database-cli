@@ -2,6 +2,8 @@
   "databases": {
     "local-mysql": {
       "type": "mysql",
+      "group": "本地开发",
+      "tags": ["应用", "SQL"],
       "url": "mysql://test:test@127.0.0.1:3306/app",
       "readonly": false,
       "blacklist": ["drop", "truncate"],
@@ -9,6 +11,8 @@
     },
     "local-postgres": {
       "type": "postgres",
+      "group": "本地开发",
+      "tags": ["应用", "SQL"],
       "url": "postgres://test:test@127.0.0.1:5432/app",
       "readonly": false,
       "blacklist": ["drop", "truncate"],
@@ -16,6 +20,8 @@
     },
     "local-redis": {
       "type": "redis",
+      "group": "本地开发",
+      "tags": ["缓存"],
       "url": "redis://127.0.0.1:6379",
       "readonly": false,
       "blacklist": ["flushall", "flushdb"],

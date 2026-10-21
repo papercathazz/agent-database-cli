@@ -29,8 +29,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "展示支持的数据库类型")]
-    List,
+    #[command(about = "展示支持的数据库类型和本地连接，可按分组或标签筛选")]
+    List {
+        #[arg(long, value_parser = parse_classification_filter, help = "按分组精确筛选")]
+        group: Option<String>,
+        #[arg(long, value_parser = parse_classification_filter, help = "按标签精确筛选，与分组取交集")]
+        tag: Option<String>,
+    },
     #[command(about = "测试数据库连接")]
     Test {
         #[arg(long)]
@@ -129,7 +134,9 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     let format = parse_output_format(&cli.format)?;
     let data = match cli.command {
-        Commands::List => runtime::run_list().await?,
+        Commands::List { group, tag } => {
+            runtime::run_list(group.as_deref(), tag.as_deref()).await?
+        }
         Commands::Test { db } => runtime::run_test(&db).await?,
         Commands::Execute { db, command } => {
             serde_json::to_value(runtime::run_execute(&db, &command).await?)?
@@ -177,6 +184,57 @@ async fn run() -> Result<()> {
     };
     output::write_output(&data, format)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod classification_tests {
+    use super::*;
+
+    #[test]
+    fn list_parses_group_and_tag_in_either_order() {
+        for args in [
+            vec![
+                "agent-database-cli",
+                "list",
+                "--group",
+                " 生产 ",
+                "--tag",
+                "应用",
+            ],
+            vec![
+                "agent-database-cli",
+                "list",
+                "--tag",
+                "应用",
+                "--group",
+                "生产",
+            ],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            match cli.command {
+                Commands::List { group, tag } => {
+                    assert_eq!(group.as_deref(), Some("生产"));
+                    assert_eq!(tag.as_deref(), Some("应用"));
+                }
+                _ => panic!("应解析为 list"),
+            }
+        }
+        for args in [
+            vec!["agent-database-cli", "list", "--tag"],
+            vec!["agent-database-cli", "list", "--group", " "],
+            vec!["agent-database-cli", "list", "--tag", "a", "--tag", "b"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+}
+
+fn parse_classification_filter(value: &str) -> std::result::Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("分组或标签不能为空".to_string());
+    }
+    Ok(value.to_string())
 }
 
 fn parse_output_format(value: &str) -> Result<OutputFormat> {

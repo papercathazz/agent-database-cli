@@ -12,7 +12,7 @@ MySQL · PostgreSQL · Redis · Oracle · MongoDB · Read-only mode · Command b
   <img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white" alt="Node.js >=20">
   <img src="https://img.shields.io/badge/npm-%3E%3D10-CB3837?logo=npm&logoColor=white" alt="npm >=10">
   <img src="https://img.shields.io/badge/sys-win%2Fmac%2Flinux-0078D6" alt="sys win/mac/linux">
-  <img src="https://img.shields.io/badge/release-v0.2.20-blue" alt="release v0.2.20">
+  <img src="https://img.shields.io/badge/release-v0.4.0-blue" alt="release v0.4.0">
 </p>
 
 [AI One-Click Installation](#ai-one-click-installation) · [Installation](#installation) · [Configuration](#configuration) · [Permission Configuration](#permission-configuration) · [Editor](#editor) · [Oracle SQLcl](#oracle-sqlcl) · [License](#license) · [Friendly Links](#friendly-links)
@@ -119,7 +119,13 @@ AGENT_DATABASE_CLI_CONFIG=/path/to/config.json agent-database-cli list
 
 The configuration file is an object. Each key under `databases` is a database connection name:
 
+Use `agent-database-cli list --group production`, `list --tag app`, or combine both filters to select their intersection. Matching is case-sensitive. The result retains the `configured` name array and adds `connections` with `name`, `type`, `group`, and `tags`; uncategorized entries use `null` and `[]`. No matches produce empty arrays.
+
+The editor switches between all connections, groups, and tags, with collapsible categories and search across connection names, types, URLs, groups, and tags. Enter or select a group and tags in the form; press Enter to add a tag and click × to remove it. Multiple tag entries edit the same connection.
+
 - `type`: Database type, supports `mysql`, `postgres`, `redis`, `oracle`, and `mongodb`
+- `group`: Optional single-level group; omitted or blank values appear under “未分组” (Ungrouped)
+- `tags`: Optional string array, e.g. `["app", "Shanghai"]`; trims whitespace, removes empty entries and duplicates, and preserves case
 - `url`: Database connection URL. In Redis standalone mode it is the direct target. In Redis cluster mode it is used as the entry node URL
 - `redisCluster`: Optional Redis cluster configuration. When configured, cluster mode is used
 - `sshTunnel`: Optional SSH tunnel configuration. In standalone mode, the database URL host and port are forwarded through SSH. In Redis cluster mode, a local forwarding port is created for each configured cluster node

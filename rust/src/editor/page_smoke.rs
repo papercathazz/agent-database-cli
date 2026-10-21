@@ -106,6 +106,65 @@ const HARNESS: &str = r##"<script>
     result.steps.scopeOneHasAlpha = document.querySelector("#rawInput").value.indexOf("alpha") >= 0;
     result.steps.scopeOneHasBeta = document.querySelector("#rawInput").value.indexOf("beta") >= 0;
 
+    // 5) 分类：原生控件、重复标签、同连接多入口，以及真实保存接口的往返。
+    const ensure = (ok, message) => { if (!ok) throw new Error(message); };
+    const fill = (selector, value) => {
+      const input = document.querySelector(selector);
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    fill('[data-bind="group"]', "生产环境");
+    for (const tag of ["应用", "上海", " 应用 "]) {
+      fill("#tagInput", tag);
+      document.querySelector("#tagInput").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    }
+    ensure(document.querySelectorAll('[data-chips="tags"] .chip').length === 2, "标签应去空白并去重");
+    document.querySelector('[data-seg="listMode"] [data-value="group"]').click();
+    ensure(document.querySelectorAll("#railList details").length === 2, "分组与未分组都应展示");
+    const production = Array.from(document.querySelectorAll("#railList details")).find((item) => item.textContent.includes("生产环境"));
+    production.open = false;
+    fill("#railSearch", "上海");
+    ensure(document.querySelectorAll("#railList .row").length === 1 && document.querySelector("#railList details").open, "搜索应匹配标签并展开分类");
+    fill("#railSearch", "");
+    ensure(!Array.from(document.querySelectorAll("#railList details")).find((item) => item.textContent.includes("生产环境")).open, "搜索后应恢复折叠状态");
+    document.querySelector('[data-seg="listMode"] [data-value="tags"]').click();
+    ensure(document.querySelectorAll("#railList details").length === 3, "多标签与无标签分类");
+    ensure(document.querySelectorAll("#railList .row.on").length === 2, "标签入口应共享选中状态");
+    document.querySelector('#railList [data-name="beta"]').click();
+    ensure(document.querySelectorAll("#railList .row.on").length === 1, "切换后应清除所有旧高亮");
+    document.querySelectorAll('#railList [data-name="alpha"]')[1].click();
+    ensure(document.querySelector('[data-bind="group"]').value === "生产环境", "多入口应编辑同一连接");
+    document.querySelector('[data-act="rm-tag"][data-index="0"]').click();
+    ensure(document.querySelectorAll("#railList details").length === 2, "移除标签后分类应即时更新");
+    document.querySelector("#saveBtn").click();
+    ensure(await until(() => document.querySelector("#saveBtn").classList.contains("done")), "分类保存失败");
+    const saved = await fetch("/api/config", { headers: { "x-agentdb-editor-token": new URLSearchParams(location.hash.slice(1)).get("t") } }).then((response) => response.json());
+    ensure(saved.data.databases.alpha.group === "生产环境" && JSON.stringify(saved.data.databases.alpha.tags) === JSON.stringify(["上海"]), "磁盘分类与 UI 不一致");
+    ensure(!saved.data.databases.beta.group && !saved.data.databases.beta.tags, "旧连接不应被自动分类");
+    document.querySelector('[data-act="duplicate"]').click();
+    ensure(document.querySelector('[data-bind="group"]').value === "生产环境" && document.querySelectorAll('[data-chips="tags"] .chip').length === 1, "复制连接应保留分类");
+    fill("#railSearch", "不存在的标签");
+    ensure(document.querySelectorAll("#railList .row").length === 0, "无匹配结果应展示空状态");
+    fill("#railSearch", "");
+    // CRLF、LF 是两个不同标签，删除操作不能依赖 HTML 属性中的原始文本。
+    const scoped = JSON.parse(document.querySelector("#rawInput").value);
+    const copyName = Object.keys(scoped)[0];
+    scoped[copyName].tags = ["华东\r\n生产", "华东\n生产", "普通"];
+    fill("#rawInput", JSON.stringify(scoped));
+    ensure(document.querySelectorAll('[data-chips="tags"] .chip').length === 3, "特殊标签应保持为独立项");
+    document.querySelector('[data-act="rm-tag"][data-index="0"]').click();
+    ensure(JSON.stringify(JSON.parse(document.querySelector("#rawInput").value)[copyName].tags) === JSON.stringify(["华东\n生产", "普通"]), "删除 CRLF 标签不能遗漏或误删 LF 标签");
+    document.querySelector('[data-act="rm-tag"][data-index="0"]').click();
+    ensure(JSON.stringify(JSON.parse(document.querySelector("#rawInput").value)[copyName].tags) === JSON.stringify(["普通"]), "连续删除应使用刷新后的数组索引");
+    document.querySelector("#saveBtn").classList.remove("done");
+    document.querySelector("#saveBtn").click();
+    ensure(await until(() => document.querySelector("#saveBtn").classList.contains("done")), "特殊标签删除后保存失败");
+    const persisted = await fetch("/api/config", { headers: { "x-agentdb-editor-token": new URLSearchParams(location.hash.slice(1)).get("t") } }).then((response) => response.json());
+    ensure(JSON.stringify(persisted.data.databases[copyName].tags) === JSON.stringify(["普通"]), "删除结果必须能保存并重新读取");
+    document.querySelector('[data-act="rm-tag"][data-index="0"]').click();
+    ensure(!JSON.parse(document.querySelector("#rawInput").value)[copyName].tags, "删除最后一个标签后应清空标签字段");
+    result.steps.classification = true;
+
   } catch (error) {
     result.errors.push("harness: " + (error && error.message ? error.message : String(error)));
   }
@@ -396,6 +455,11 @@ async fn page_smoke_covers_url_secret_and_scope() -> Result<()> {
         parsed["steps"]["scopeOneHasBeta"],
         json!(false),
         "单连接视图混入了 beta"
+    );
+    assert_eq!(
+        parsed["steps"]["classification"],
+        json!(true),
+        "分类交互或保存失败: {parsed}"
     );
     let offset = parsed["steps"]["maxIconTextOffset"]
         .as_f64()

@@ -149,6 +149,10 @@
      ========================================================== */
   const board = $("#board");
   const rawInput = $("#rawInput");
+  $("#railSearch").addEventListener("input", (event) => {
+    S.search = event.target.value;
+    renderRail();
+  });
 
   function bindValue(element) {
     const kind = element.dataset.kind || "text";
@@ -182,7 +186,7 @@
       refreshDerived();
       return;
     }
-    if (element.id === "chipInput") return;
+    if (element.id === "chipInput" || element.id === "tagInput") return;
     if (!element.dataset.bind) return;
     const bind = element.dataset.bind;
     const value = bindValue(element);
@@ -244,6 +248,17 @@
     refreshDerived();
   });
 
+  function commitTagInput() {
+    const input = $("#tagInput");
+    const value = input.value.trim();
+    if (!value) return;
+    current().tags = [...new Set([...databaseTags(current()), value])];
+    input.value = "";
+    renderBoard();
+    renderDerived();
+    $("#tagInput").focus();
+  }
+
   function addChip(value) {
     const db = current();
     const list = db.blacklist || [];
@@ -278,6 +293,12 @@
   // 分段控件按动作收窄渲染范围：只有改变表单结构的切换才重建表单
   function applySegment(key, value) {
     const db = current();
+    if (key === "listMode") {
+      S.listMode = value;
+      $$('[data-seg="listMode"] button').forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.value === value)));
+      renderRail();
+      return;
+    }
     if (key === "scope") {
       // 面板范围不影响表单和轨道，重画 JSON 面板即可
       S.scope = value === "all" ? "all" : "one";
@@ -336,6 +357,13 @@
     duplicate: () => duplicateConnection(),
     remove: () => removeConnection(),
     "add-chip": (target) => { addChip(target.dataset.value); renderBoard(); renderDerived(); },
+    "rm-tag": (target) => {
+      // 用展示数组索引定位，避免 HTML 属性解析转换标签中的 CR/CRLF。
+      current().tags = databaseTags(current()).filter((_, index) => index !== Number(target.dataset.index));
+      renderBoard();
+      renderDerived();
+      $("#tagInput").focus();
+    },
     "rm-chip": (target) => {
       const db = current();
       db.blacklist = (db.blacklist || []).filter((item) => item !== target.dataset.value);
@@ -378,6 +406,13 @@
 
 
   board.addEventListener("keydown", (event) => {
+    if (event.target.id === "tagInput") {
+      if ((event.key === "Enter" || event.key === ",") && !event.isComposing) {
+        event.preventDefault();
+        commitTagInput();
+      }
+      return;
+    }
     if (event.target.id !== "chipInput") return;
     if (event.key === "Enter" || event.key === ",") {
       event.preventDefault();

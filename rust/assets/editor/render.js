@@ -4,32 +4,52 @@
   function renderRail() {
     const list = $("#railList");
     const names = Object.keys(databases());
-    // 每次输入都重建列表会重置滚动位置、闪一下动画，因此内容没变就直接跳过
-    const signature = names
-      .map((name) => [name, databases()[name].type, issueFor(name).length, rowDirty(name), name === S.selected].join("|"))
-      .join(";");
+    // 每次渲染内按连接复用状态，供签名和各标签入口共享，不跨次缓存。
+    const rowStates = new Map(names.map((name) => [name, { issueCount: issueFor(name).length, dirty: rowDirty(name) }]));
+    const signature = JSON.stringify([S.listMode, S.search, names.map((name) => {
+      const db = databases()[name];
+      return [name, db.type, db.url, databaseGroup(db), databaseTags(db), rowStates.get(name).issueCount, rowStates.get(name).dirty, name === S.selected];
+    })]);
     if (signature === S.railSignature) return;
     S.railSignature = signature;
     $("#railCount").textContent = String(names.length).padStart(2, "0");
-    if (!names.length) {
-      list.innerHTML = '<li class="rail-empty">还没有连接配置</li>';
-      return;
+    const scrollTop = list.scrollTop;
+    const scrollLeft = list.scrollLeft;
+    const focused = document.activeElement;
+    const focusedRow = list.contains(focused) ? focused.closest(".row") : null;
+    if (list.dataset.searching !== "true") {
+      $$("details", list).forEach((section) => S.collapsedSections.set(section.dataset.key, !section.open));
     }
-    list.innerHTML = names.map((name, index) => {
+    const sections = connectionSections(databases(), S.listMode, S.search);
+    const row = (name, index, sectionKey) => {
       const db = databases()[name];
       const type = String(db.type || "mysql");
-      const bad = issueFor(name).length > 0;
-      const dirty = rowDirty(name);
+      const state = rowStates.get(name);
+      const bad = state.issueCount > 0;
       const cls = ["row"];
       if (name === S.selected) cls.push("on");
       if (bad) cls.push("bad");
-      if (dirty) cls.push("dirty");
-      return '<li><button class="' + cls.join(" ") + '" data-name="' + esc(name) + '" style="--row-accent:var(--' + esc(type) + ');animation-delay:' + (index * 26) + 'ms">' +
-        '<span class="dot"></span>' +
-        '<span class="meta"><span class="nm">' + esc(name) + '</span><span class="ty" style="color:var(--' + esc(type) + ')">' + esc(type) + '</span></span>' +
-        '<span class="flag">' + (bad ? icon("circle-alert", "i-s") : '<span class="dot-dirty"></span>') + '</span>' +
-        '</button></li>';
-    }).join("");
+      if (state.dirty) cls.push("dirty");
+      return '<li><button class="' + cls.join(" ") + '" data-name="' + esc(name) + '" data-section="' + esc(sectionKey) + '" style="--row-accent:var(--' + esc(type) + ');animation-delay:' + (index * 26) + 'ms">' +
+        '<span class="dot"></span><span class="meta"><span class="nm">' + esc(name) + '</span><span class="ty" style="color:var(--' + esc(type) + ')">' + esc(type) + '</span></span>' +
+        '<span class="flag">' + (bad ? icon("circle-alert", "i-s") : '<span class="dot-dirty"></span>') + '</span></button></li>';
+    };
+    list.innerHTML = sections.length ? sections.map(({ key, names }) => {
+      const sectionKey = JSON.stringify([S.listMode, key]);
+      const rows = names.map((name, index) => row(name, index, sectionKey)).join("");
+      if (S.listMode === "all") return rows;
+      const title = key === null ? (S.listMode === "tags" ? "无标签" : "未分组") : key;
+      const open = S.search.trim() || !S.collapsedSections.get(sectionKey);
+      return '<li class="rail-section"><details data-key="' + esc(sectionKey) + '"' + (open ? ' open' : '') + '><summary>' + esc(title) + '<b>' + names.length + '</b></summary><ul class="section-rows">' + rows + '</ul></details></li>';
+    }).join("") : '<li class="rail-empty">' + (names.length ? "未找到连接" : "还没有连接配置") + '</li>';
+    list.dataset.mode = S.listMode;
+    list.dataset.searching = String(Boolean(S.search.trim()));
+    list.scrollTop = scrollTop;
+    list.scrollLeft = scrollLeft;
+    if (focusedRow) {
+      const target = $$(".row", list).find((button) => button.dataset.name === focusedRow.dataset.name && button.dataset.section === focusedRow.dataset.section);
+      if (target) target.focus({ preventScroll: true });
+    }
   }
 
   function issueFor(name) {
@@ -181,13 +201,15 @@
     refreshSecretField(field);
   }
 
-  function chipsField(values) {
-    const chips = (values || []).map((value) =>
-      '<span class="chip"><span>' + esc(value) + '</span><button type="button" data-act="rm-chip" data-value="' + esc(value) + '" aria-label="移除">' + icon("x", "i-s") + '</button></span>'
+  function chipsField(values, fieldName) {
+    const tags = fieldName === "tags";
+    const chips = (values || []).map((value, index) =>
+      '<span class="chip"><span>' + esc(value) + '</span><button type="button" data-act="' + (tags ? "rm-tag" : "rm-chip") + '"' +
+      (tags ? ' data-index="' + index + '"' : ' data-value="' + esc(value) + '"') +
+      ' aria-label="' + (tags ? "移除标签 " + esc(value) : "移除") + '">' + icon("x", "i-s") + '</button></span>'
     ).join("");
-    return '<div class="chips" data-chips="blacklist">' + chips +
-      '<input class="chip-input" id="chipInput" placeholder="' + ((values || []).length ? "继续添加" : "输入命令后回车") + '" spellcheck="false" aria-label="添加黑名单命令">' +
-      '</div>';
+    return '<div class="chips" data-chips="' + (tags ? "tags" : "blacklist") + '">' + chips +
+      '<input class="chip-input" id="' + (tags ? "tagInput" : "chipInput") + '"' + (tags ? ' list="tagOptions"' : '') + ' placeholder="' + ((values || []).length ? "继续添加" : (tags ? "输入或选择标签后回车" : "输入命令后回车")) + '" spellcheck="false" autocomplete="off" aria-label="' + (tags ? "添加标签" : "添加黑名单命令") + '"></div>';
   }
 
   let boardHtml = "";
@@ -208,6 +230,7 @@
     const sections = [
       renderHead(db, type, parsed, issues),
       renderConnectionGroup(db, type, parsed),
+      renderClassificationGroup(db),
       renderCredentialGroup(db, type, parsed),
       renderSecurityGroup(db, type),
       renderSshGroup(db),
@@ -259,6 +282,17 @@
       (parsed.params.length ? '<div class="suggest">' + parsed.params.map((pair) =>
         '<span class="chip">' + esc(pair[0]) + (pair[1] ? "=" + esc(pair[1]) : "") + '</span>').join("") + '</div>' : "");
     return group({ title: "连接", icon: "plug-zap", delay: 40, flag: parsed.ok ? (parsed.protocol || "—") : "URL 无法解析", flagTone: parsed.ok ? "" : "var(--danger)" }, body);
+  }
+
+  function renderClassificationGroup(db) {
+    const groups = [...new Set(Object.values(databases()).map(databaseGroup).filter(Boolean))];
+    const tags = [...new Set(Object.values(databases()).flatMap(databaseTags))];
+    const options = (values) => values.map((value) => '<option value="' + esc(value) + '"></option>').join("");
+    const groupControl = '<input class="inp" data-bind="group" value="' + esc(databaseGroup(db) || "") + '" list="groupOptions" placeholder="未分组" autocomplete="off" aria-label="分组"><datalist id="groupOptions">' + options(groups) + '</datalist>';
+    const body = '<div class="grid">' +
+      field("分组", groupControl, { icon: "folder-open" }) +
+      field("标签", chipsField(databaseTags(db), "tags") + '<datalist id="tagOptions">' + options(tags) + '</datalist>', { icon: "hash" }) + '</div>';
+    return group({ title: "分组与标签", icon: "folder-open", delay: 65 }, body);
   }
 
   function renderCredentialGroup(db, type, parsed) {

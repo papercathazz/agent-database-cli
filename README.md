@@ -12,7 +12,7 @@ MySQL · PostgreSQL · Redis · Oracle · MongoDB · 只读模式 · 命令黑�
   <img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white" alt="Node.js >=20">
   <img src="https://img.shields.io/badge/npm-%3E%3D10-CB3837?logo=npm&logoColor=white" alt="npm >=10">
   <img src="https://img.shields.io/badge/sys-win%2Fmac%2Flinux-0078D6" alt="sys win/mac/linux">
-  <img src="https://img.shields.io/badge/release-v0.3.0-blue" alt="release v0.2.20">
+  <img src="https://img.shields.io/badge/release-v0.4.0-blue" alt="release v0.4.0">
 </p>
 
 [AI 一键安装](#ai-一键安装) · [安装](#安装) · [配置](#配置) · [权限配置](#权限配置) · [编辑页面](#编辑页面) · [Oracle SQLcl](#oracle-sqlcl) · [许可证](#许可证) · [友情链接](#友情链接)
@@ -106,11 +106,25 @@ AGENT_DATABASE_CLI_CONFIG=/path/to/config.json agent-database-cli list
 
 配置文件是一个对象，`databases` 中每个 key 是一个数据库连接名。
 
+连接列表支持分组和标签筛选，区分大小写，同时指定时取交集：
+
+```bash
+agent-database-cli list --group 生产环境
+agent-database-cli list --tag 应用
+agent-database-cli list --group 生产环境 --tag 应用
+```
+
+返回结果保留 `configured` 连接名数组，新增 `connections` 数组，包含 `name`、`type`、`group`、`tags`。未分类连接的 `group` 为 `null`、`tags` 为 `[]`；无匹配时两个数组均为空。
+
+编辑页面左侧可切换「全部 / 按分组 / 按标签」，分类支持折叠；搜索可匹配连接名、类型、URL、分组和标签。表单支持输入或选择分组和标签，标签按 Enter 添加、点击 × 移除。多标签连接会出现在各个标签分类下，编辑的是同一条连接。
+
 连接配置：
 
 | 字段 | 适用范围 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `type` | 全部数据库 | 无 | 数据库类型，支持 `mysql`、`postgres`、`redis`、`oracle`、`mongodb` |
+| `group` | 全部数据库 | 无 | 可选的单层分组名；省略或空白时显示为「未分组」 |
+| `tags` | 全部数据库 | `[]` | 标签字符串数组，例如 `["应用", "上海"]`；去除首尾空格、空项和重复项，保留大小写 |
 | `url` | 全部数据库 | 无 | 数据库连接 URL；Redis 单机模式直接连接该地址，Redis 集群模式下作为入口节点 URL |
 | `passwordRef` | 全部数据库 | 无 | 数据库 URL 密码的本地密文引用；首次使用明文 URL 密码时自动生成 |
 | `database` | MongoDB | 无 | MongoDB 默认数据库名 |

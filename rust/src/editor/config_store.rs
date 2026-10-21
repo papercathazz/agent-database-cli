@@ -167,6 +167,37 @@ mod tests {
     }
 
     #[test]
+    fn classification_roundtrip_preserves_secret_refs_and_rejects_wrong_types() {
+        let dir = temp_dir("classification");
+        let path = dir.path().join("config.json");
+        let mut data = json!({"databases":{"local":{
+            "type":"mysql","url":"mysql://user@localhost/app",
+            "passwordRef":"agentdbcli:local:url","group":"生产环境","tags":["应用","上海"],
+            "readonly":true,"blacklist":["drop"]
+        }}});
+        save_config_payload(&path, &json!({"raw":data.to_string()})).unwrap();
+        assert_eq!(load_config_payload(&path).unwrap()["data"], data);
+        data["databases"]["local"]["group"] = json!("测试环境");
+        data["databases"]["local"]["tags"] = json!(["应用"]);
+        save_config_payload(&path, &json!({"raw":data.to_string()})).unwrap();
+        assert_eq!(load_config_payload(&path).unwrap()["data"], data);
+        let saved = fs::read_to_string(&path).unwrap();
+        data["databases"]["local"]["tags"] = json!([1]);
+        assert!(save_config_payload(&path, &json!({"raw":data.to_string()})).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), saved);
+        data["databases"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("group");
+        data["databases"]["local"]
+            .as_object_mut()
+            .unwrap()
+            .remove("tags");
+        save_config_payload(&path, &json!({"raw":data.to_string()})).unwrap();
+        assert_eq!(load_config_payload(&path).unwrap()["data"], data);
+    }
+
+    #[test]
     fn secret_payload_only_serves_referenced_refs() {
         let dir = temp_dir("secret");
         let path = dir.path().join("config.json");

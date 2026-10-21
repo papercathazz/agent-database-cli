@@ -37,6 +37,9 @@
     // 每个密文字段各自的显示状态：key 用字段名（url / sshTunnel.password / sshTunnel.passphrase）
     shown: {},
     railSignature: "",
+    listMode: "all",
+    search: "",
+    collapsedSections: new Map(),
     // JSON 面板范围：one = 只显示当前连接，all = 整个配置文件
     scope: "one",
     // 点眼睛解密出来的明文，只在内存里按 ref 缓存
@@ -52,6 +55,33 @@
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const databases = () => S.data.databases || {};
   const current = () => databases()[S.selected] || {};
+
+  // 分类展示与序列化共用归一化规则；错误类型留给服务端校验，不在页面静默纠正。
+  function databaseGroup(db) {
+    return typeof db.group === "string" ? db.group.trim() || null : null;
+  }
+
+  function databaseTags(db) {
+    return Array.isArray(db.tags)
+      ? [...new Set(db.tags.filter((tag) => typeof tag === "string").map((tag) => tag.trim()).filter(Boolean))]
+      : [];
+  }
+
+  function connectionSections(entries, mode, query) {
+    const search = (query || "").trim().toLowerCase();
+    const sections = new Map();
+    for (const [name, db] of Object.entries(entries)) {
+      const tags = databaseTags(db);
+      const category = databaseGroup(db);
+      if (![name, db.type, db.url, category, ...tags].join(" ").toLowerCase().includes(search)) continue;
+      const keys = mode === "tags" ? (tags.length ? tags : [null]) : mode === "group" ? [category] : [null];
+      keys.forEach((key) => {
+        if (!sections.has(key)) sections.set(key, []);
+        sections.get(key).push(name);
+      });
+    }
+    return Array.from(sections, ([key, names]) => ({ key, names }));
+  }
 
   function getPath(root, path) {
     return path.split(".").reduce((node, key) => (node == null ? undefined : node[key]), root);
@@ -72,9 +102,13 @@
   // url 例外：它是必填字段，空值也要保留，这样 CLI 会给出带连接名的提示而不是 serde 的结构错误
   function cleanDatabase(source) {
     const db = clone(source);
+    if (typeof db.group === "string") db.group = databaseGroup(db);
+    if (Array.isArray(db.tags) && db.tags.every((tag) => typeof tag === "string")) db.tags = databaseTags(db);
     for (const key of Object.keys(db)) {
       if (key === "url") continue;
       const value = db[key];
+      if (key === "group" && value !== null && typeof value !== "string") continue;
+      if (key === "tags" && value !== null && (!Array.isArray(value) || !value.every((tag) => typeof tag === "string"))) continue;
       if (value === "" || value === null || (Array.isArray(value) && value.length === 0)) delete db[key];
     }
     if (db.sshTunnel && typeof db.sshTunnel === "object") {
