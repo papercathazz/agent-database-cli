@@ -389,6 +389,15 @@ agent-database-cli editor stop
 
 页面只负责写配置文件，真正的权限控制仍然由 CLI 在执行命令时按黑名单和只读模式判断。
 
+## 查询超时与连接复用
+
+- `AGENT_DB_QUERY_TIMEOUT_SECS`：单次 daemon 数据库请求的响应期限，默认 `60` 秒，包含初始化、排队和查询读取；只接受正整数，无效值使用默认值。
+- `AGENT_DB_DAEMON_IDLE_SECS`：daemon 无活跃请求时的退出期限，默认 `1800` 秒，每 5 秒检查一次；从接收请求到响应写完均计为活跃。只接受正整数，无效值使用默认值。单库连接的 `keepAliveSeconds` 默认仍为 `180` 秒。
+- 修改环境变量后先执行 `agent-database-cli daemon stop`，下一次命令会使用新值启动 daemon。
+- MySQL 同库查询通过连接池并发执行。URL 缺省 `pool_max` 时取 `max(4, 显式 pool_min)`；显式最小值、最大值和其他池设置保持有效，冲突约束报错。超时仅关闭当前查询连接。不同命令可能使用不同会话，不应依赖跨命令事务或会话变量。
+- SQLcl 超时会终止子进程；Oracle 原生驱动请求 OCI 取消执行，仅在 Oracle Client ≥ 18.1 时按剩余期限设置往返超时；Client 11.2/12.1/12.2 保留外层响应期限与 OCI 取消机制。连接建立期间尚无 OCI 连接句柄，无法用该取消接口中断登录。其他驱动提供客户端响应期限，不保证服务端命令立即停止。超时不代表写操作未执行，重试前应核实数据库状态。
+- `daemon status` 的 `busy`、`inFlight` 包含正在执行和排队的请求；空闲回收不会移除有活跃请求的连接。
+
 ## Oracle SQLcl
 
 官方链接：https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/
@@ -407,7 +416,7 @@ Oracle 默认使用 SQLcl，避免默认依赖 Oracle Instant Client，也更适
 }
 ```
 
-SQLcl 模式会通过 stdin 传入连接脚本，避免密码出现在命令行参数列表中。安全检查仍在执行前完成，黑名单和只读模式都会生效。
+SQLcl 模式通过临时脚本文件传入连接信息，避免密码出现在命令行参数列表中；执行结束、失败或取消后删除脚本。安全检查仍在执行前完成，黑名单和只读模式都会生效。
 
 ## 更新
 

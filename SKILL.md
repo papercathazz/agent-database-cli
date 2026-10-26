@@ -14,7 +14,7 @@ description: 使用本地 agent-database-cli 安全操作已配置的数据库�
 - 执行 SQL、Redis 命令或 MongoDB JSON 命令
 - 查询表、列、集合、Redis keys 等元信息
 - 按单个数据库配置执行命令黑名单和只读模式
-- 普通命令会按需自动启动本地 daemon，daemon 默认空闲 `300` 秒后自动退出
+- 普通命令会按需自动启动本地 daemon，daemon 默认空闲 `1800` 秒后自动退出
 - 通过本地 daemon 短时间保持连接，单个数据库连接默认空闲 `180` 秒释放
 - daemon 在 Windows 使用 named pipe，在 macOS/Linux 使用 Unix socket
 - 预编译二进制支持 macOS x64/arm64、Linux x64/arm64、Windows x64
@@ -209,13 +209,19 @@ agent-database-cli meta --db "<databaseName>" --type keys --pattern "user:*"
 
 ## daemon
 
-管理本地连接守护进程。普通 `test`、`exec`、`meta`、`reset` 命令会在 daemon 未运行时自动启动 daemon，已运行时直接复用，不会重复启动。daemon 使用 Unix socket，不暴露网络端口，默认空闲 `300` 秒后自动退出。
+管理本地连接守护进程。普通 `test`、`exec`、`meta`、`reset` 命令会在 daemon 未运行时自动启动 daemon，已运行时直接复用，不会重复启动。daemon 使用 Unix socket，不暴露网络端口，默认空闲 `1800` 秒后自动退出。
 
 ```bash
 agent-database-cli daemon start
 agent-database-cli daemon status
 agent-database-cli daemon stop
 ```
+
+查询响应默认限时 `60` 秒，通过 `AGENT_DB_QUERY_TIMEOUT_SECS` 配置；daemon 空闲退出通过 `AGENT_DB_DAEMON_IDLE_SECS` 配置，默认 `1800` 秒。两者只接受正整数，无效值使用默认值。修改后需 `daemon stop`，下次调用自动按新环境启动；单库 `keepAliveSeconds` 仍默认 `180` 秒。
+
+MySQL 同库请求通过连接池并发执行；缺省 `pool_max` 为 `max(4, 显式 pool_min)`，保留其他 URL 池参数，冲突约束报错。超时只关闭当前连接。命令可能使用不同会话，不要依赖跨命令事务/会话变量。`daemon status` 的 `busy` 和 `inFlight` 反映执行和排队中的请求；请求从接收到响应写完都禁止空闲退出。
+
+SQLcl 超时终止子进程；原生 Oracle 请求 OCI 取消，仅在 Client ≥ 18.1 时按剩余期限限制每次往返；Client 11.2/12.1/12.2 保留外层期限与 OCI 取消（建立连接时尚无句柄，无法用 OCI 取消登录）。其他驱动的响应超时不保证服务端立即停止；写操作超时后先核实数据库状态再决定是否重试。
 
 返回值：
 

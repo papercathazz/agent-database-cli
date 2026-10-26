@@ -1,10 +1,15 @@
+use super::deadline::{log_cleanup, query_timeout, timeout_error};
 use super::DatabaseAdapter;
 use crate::types::{MetadataRequest, MetadataType, QueryResult};
 use crate::utils::masking::mask_secret;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+use tokio::process::Command;
 use url::Url;
 use uuid::Uuid;
 
@@ -23,30 +28,32 @@ impl OracleSqlclAdapter {
         }
     }
 
-    fn run_sqlcl(&self, command: &str) -> Result<QueryResult> {
+    async fn run_sqlcl(&self, command: &str) -> Result<QueryResult> {
         let markers = Markers::new();
         let dir = std::env::temp_dir().join(format!("agent-database-cli-sqlcl-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir)?;
+        let _cleanup = ScriptDirectory(dir.clone());
         let script_path = dir.join("command.sql");
         fs::write(&script_path, self.build_script(command, &markers))?;
-        let result = self.spawn_sqlcl(&script_path, &markers);
-        let _ = fs::remove_dir_all(&dir);
-        result
+        self.spawn_sqlcl(&script_path, &markers).await
     }
 
-    fn spawn_sqlcl(&self, script_path: &Path, markers: &Markers) -> Result<QueryResult> {
+    async fn spawn_sqlcl(&self, script_path: &Path, markers: &Markers) -> Result<QueryResult> {
         let mut command = Command::new(&self.sqlcl_path);
         command
             .arg("-S")
             .arg("/nolog")
             .arg(format!("@{}", script_path.display()))
             .env("NO_COLOR", "1")
-            .env("TERM", "dumb");
+            .env("TERM", "dumb")
+            .kill_on_drop(true);
         if let Some(java_home) = &self.java_home {
             command.env("JAVA_HOME", java_home);
         }
-        let output = command
-            .output()
+        // output 持有子进程；超时或外层请求取消时 kill_on_drop 终止并交由 Tokio 回收。
+        let output = tokio::time::timeout(query_timeout(), command.output())
+            .await
+            .map_err(|_| timeout_error())?
             .map_err(|error| anyhow::anyhow!("SQLcl 启动失败: {}", error))?;
         let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
@@ -98,7 +105,7 @@ impl DatabaseAdapter for OracleSqlclAdapter {
         self.execute("select 1 from dual").await.map(|_| ())
     }
     async fn execute(&mut self, command: &str) -> Result<QueryResult> {
-        self.run_sqlcl(command)
+        self.run_sqlcl(command).await
     }
     async fn metadata(&mut self, request: MetadataRequest) -> Result<QueryResult> {
         match request.request_type {
@@ -116,6 +123,15 @@ impl DatabaseAdapter for OracleSqlclAdapter {
             }
             _ => anyhow::bail!("当前数据库不支持元信息类型: {:?}", request.request_type),
         }
+    }
+}
+
+/// 请求取消也会执行清理，避免遗留含连接凭据的临时脚本。
+struct ScriptDirectory(PathBuf);
+
+impl Drop for ScriptDirectory {
+    fn drop(&mut self) {
+        log_cleanup(fs::remove_dir_all(&self.0).map_err(Into::into));
     }
 }
 
@@ -240,6 +256,81 @@ fn sqlcl_json_to_query_result(value: Value) -> QueryResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sqlcl_timeout_and_cancellation_kill_process_and_remove_script() {
+        use std::os::unix::fs::PermissionsExt;
+        use tokio::time::{sleep, timeout, Duration};
+        for cancel in [false, true] {
+            let dir = std::env::temp_dir().join(format!("agent-db-sqlcl-test-{}", Uuid::new_v4()));
+            fs::create_dir_all(&dir).unwrap();
+            let _cleanup = ScriptDirectory(dir.clone());
+            let executable = dir.join("fake-sqlcl");
+            let pid_path = dir.join("pid");
+            let script_path_record = dir.join("script-path");
+            // exec 让 sleep 与启动进程共用 PID，验证终止的确实是执行中的子进程。
+            fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\necho $$ > '{}'\nprintf '%s' \"$3\" > '{}'\nexec sleep 30\n",
+                    pid_path.display(),
+                    script_path_record.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+            let mut adapter = OracleSqlclAdapter::new(
+                "oracle://test:test@localhost/FREEPDB1".to_string(),
+                executable.to_string_lossy().into_owned(),
+                None,
+            );
+            let (expire, expired) = tokio::sync::oneshot::channel::<()>();
+            let query = tokio::spawn(async move {
+                let operation = adapter.execute("select 1 from dual");
+                tokio::pin!(operation);
+                // 进程启动速度不属于超时断言；等测试确认启动后再施加期限。
+                tokio::select! {
+                    _ = &mut operation => panic!("测试子进程不应提前结束"),
+                    _ = expired => timeout(Duration::from_millis(30), operation).await,
+                }
+            });
+            let (pid, command_path) = timeout(Duration::from_secs(5), async {
+                loop {
+                    let pid = fs::read_to_string(&pid_path)
+                        .ok()
+                        .and_then(|value| value.trim().parse::<i32>().ok());
+                    let path = fs::read_to_string(&script_path_record)
+                        .ok()
+                        .filter(|value| !value.is_empty());
+                    if let (Some(pid), Some(path)) = (pid, path) {
+                        break (pid, path);
+                    }
+                    sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let command_path = command_path.trim_start_matches('@');
+            assert!(Path::new(command_path).exists());
+            if cancel {
+                query.abort();
+                assert!(query.await.unwrap_err().is_cancelled());
+            } else {
+                expire.send(()).unwrap();
+                assert!(query.await.unwrap().is_err());
+            }
+            timeout(Duration::from_secs(2), async {
+                // kill(pid, 0) 只探测进程是否存在，不发送信号。
+                while unsafe { libc::kill(pid, 0) } == 0 {
+                    sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(!Path::new(command_path).exists());
+        }
+    }
 
     #[test]
     fn parse_sqlcl_output_uses_markers_and_sqlcl_json_shape() {

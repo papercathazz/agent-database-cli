@@ -31,7 +31,7 @@ What it can do:
 - Execute SQL, Redis commands, or MongoDB JSON commands against a specified database
 - Query database metadata such as tables, columns, collections, and Redis keys. Redis keys metadata uses cursor-based `SCAN` instead of blocking `KEYS`
 - Enable read-only mode and command blocklists per database configuration
-- Auto-start the local daemon on demand; the daemon exits after `300` idle seconds by default
+- Auto-start the local daemon on demand; the daemon exits after `1800` idle seconds by default
 - Keep connections alive through the local daemon; each database connection is released after `180` idle seconds by default
 - Oracle uses SQLcl by default; native `oracle`/`oracledb` drivers can be selected explicitly when Oracle Instant Client is available
 - Edit the configuration file visually in a local page, with validation before writing to disk
@@ -370,6 +370,15 @@ How sensitive fields are handled:
 
 The page only writes the configuration file; permission control still happens when the CLI executes a command with the blocklist and read-only rules.
 
+## Query deadlines and connection reuse
+
+- `AGENT_DB_QUERY_TIMEOUT_SECS`: response deadline for each daemon database request, including initialization, queuing and result reads; defaults to `60` seconds. Only positive integers are accepted; invalid values use the default.
+- `AGENT_DB_DAEMON_IDLE_SECS`: daemon idle shutdown threshold, default `1800` seconds, checked every 5 seconds. Requests stay active from acceptance through the complete response write. Only positive integers are accepted; invalid values use the default. Per-database `keepAliveSeconds` still defaults to `180`.
+- After changing these variables, run `agent-database-cli daemon stop`; the next command starts a daemon with the new values.
+- MySQL queries against the same configured database run concurrently through a pool. When `pool_max` is omitted, it defaults to `max(4, explicit pool_min)`. Explicit constraints and other pool settings are preserved; conflicting constraints fail. A timeout closes only its own connection. Commands may use different sessions, so do not rely on transactions or session variables spanning commands.
+- SQLcl timeouts terminate the child process. Native Oracle requests OCI cancellation and updates the per-round-trip limit using the remaining deadline only on Oracle Client ≥ 18.1; Client 11.2/12.1/12.2 retain the outer response deadline and OCI cancellation. During connection establishment, no OCI connection handle is available to cancel login. Other drivers provide a client response deadline without guaranteeing immediate server-side cancellation. A timeout does not prove that a write was not executed; inspect database state before retrying.
+- `daemon status` includes executing and queued requests in `busy` and `inFlight`; idle cleanup preserves active entries.
+
 ## Oracle SQLcl
 
 Official link: https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/
@@ -388,7 +397,7 @@ Oracle uses SQLcl by default, avoiding a mandatory Oracle Instant Client depende
 }
 ```
 
-SQLcl mode passes the connection script through stdin to avoid exposing the password in process arguments. Security checks still happen before execution, and both blocklist and read-only mode remain effective.
+SQLcl passes connection information through a temporary script file to avoid exposing the password in process arguments; the script is removed on completion, failure or cancellation. Security checks still happen before execution, and both blocklist and read-only mode remain effective.
 
 ## Update
 
